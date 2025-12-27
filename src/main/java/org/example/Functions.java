@@ -7,6 +7,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -16,6 +17,7 @@ import lombok.Setter;
 import lombok.ToString;
 
 public class Functions {
+
     @Getter
     @Setter
     @NoArgsConstructor
@@ -24,10 +26,11 @@ public class Functions {
     @ToString
     @Builder
     public static class Student {
+
         private String name;
         private int age;
         private boolean isGraduated;
-        
+
         public Map<String, Object> toMap() {
             Map<String, Object> map = new HashMap<>();
             map.put("name", name);
@@ -40,10 +43,10 @@ public class Functions {
     /**
      * Selects an object from a list based on the specified field and value.
      *
-     * @param <T> The type of elements in the list
-     * @param list The input list (can be List<Object>, List<String>, List<Map>, etc.)
+     * @param <T>        The type of elements in the list
+     * @param list       The input list (can be List<Object>, List<String>, List<Map>, etc.)
      * @param fieldOrKey The field name (for objects), key (for maps), or "index" for list index
-     * @param value The value to match against (as String, will be converted to target type)
+     * @param value      The value to match against (as String, will be converted to target type)
      * @return The first matching element, or null if not found
      */
     @SuppressWarnings("unchecked")
@@ -81,7 +84,9 @@ public class Functions {
     // Helper method to handle Map elements
     private static <T> T findInMapList(List<Map> list, String key, String value) {
         for (Map map : list) {
-            if (map == null) continue;
+            if (map == null) {
+                continue;
+            }
 
             Object mapValue = map.get(key);
             if (mapValue != null && mapValue.toString().equalsIgnoreCase(value)) {
@@ -92,7 +97,7 @@ public class Functions {
     }
 
     // Helper method to handle primitive/wrapper types
-    private static  <T> T findInPrimitiveList(List<T> list, String value) {
+    private static <T> T findInPrimitiveList(List<T> list, String value) {
         for (T item : list) {
             if (item != null && item.toString().equals(value)) {
                 return item;
@@ -102,8 +107,10 @@ public class Functions {
     }
 
     // Helper method to handle custom objects using reflection
-    private static  <T> T findInObjectList(List<T> list, String fieldName, String value) {
-        if (list.isEmpty()) return null;
+    private static <T> T findInObjectList(List<T> list, String fieldName, String value) {
+        if (list.isEmpty()) {
+            return null;
+        }
 
         T sample = list.get(0);
         Class<?> clazz = sample.getClass();
@@ -118,7 +125,9 @@ public class Functions {
             if (field != null) {
                 field.setAccessible(true);
                 for (T item : list) {
-                    if (item == null) continue;
+                    if (item == null) {
+                        continue;
+                    }
 
                     Object fieldValue = field.get(item);
                     if (fieldValue != null && fieldValue.toString().equalsIgnoreCase(value)) {
@@ -140,53 +149,154 @@ public class Functions {
             obj instanceof Character;
     }
 
+    /**
+     * Selects an object from a list based on the specified criteria.
+     *
+     * @param <T>        The type of elements in the list
+     * @param list       The input list (can be List<Object>, List<String>, List<Map>, etc.)
+     * @param keyOrField The key (for maps), field name (for objects), or "index" for list index
+     * @param delimiter  Delimiter for splitting values (for backward compatibility)
+     * @param values     The value(s) to match against (can be comma-separated if using delimiter)
+     * @return The first matching element, or null if not found
+     */
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public <T> T selectObjectFromList(List<T> list,
+        String delimiter,
+        String keyOrField,
+        String values) {
+        // Handle null/empty list
+        if (CollectionUtils.isEmpty(list)) {
+            return null;
+        }
+
+        // Handle index-based selection
+        if ("index".equalsIgnoreCase(keyOrField) || "i".equalsIgnoreCase(keyOrField)) {
+            try {
+                int index = Integer.parseInt(values);
+                return (index >= 0 && index < list.size()) ? list.get(index) : null;
+            } catch (NumberFormatException e) {
+                return null;
+            }
+        }
+
+        // If values contains delimiter, split it (backward compatibility)
+        String[] valueArray = values.contains(delimiter) ?
+            values.split(delimiter) :
+            new String[]{values};
+
+        // Get the first non-null element to determine the type
+        Object sample = list.stream().filter(Objects::nonNull).findFirst().orElse(null);
+        if (sample == null) {
+            return null;
+        }
+
+        // Handle different types of list elements
+        if (sample instanceof Map) {
+            return findMapInList((List<Map>) list, keyOrField, valueArray);
+        } else if (isPrimitiveOrWrapper(sample)) {
+            return findPrimitiveInList(list, valueArray);
+        } else {
+            return findObjectInList(list, keyOrField, valueArray);
+        }
+    }
+
+    // Helper method to handle Map elements
+    private <T> T findMapInList(List<Map> list, String key, String[] values) {
+        for (Map map : list) {
+            if (map == null) {
+                continue;
+            }
+
+            Object mapValue = map.get(key);
+            if (mapValue != null && Arrays.stream(values)
+                .anyMatch(value -> mapValue.toString().equals(value))) {
+                return (T) map;
+            }
+        }
+        return null;
+    }
+
+    // Helper method to handle primitive/wrapper types
+    private <T> T findPrimitiveInList(List<T> list, String[] values) {
+        for (T item : list) {
+            if (item != null && Arrays.stream(values)
+                .anyMatch(value -> item.toString().equals(value))) {
+                return item;
+            }
+        }
+        return null;
+    }
+
+    // Helper method to handle custom objects using reflection
+    private <T> T findObjectInList(List<T> list, String fieldName, String[] values) {
+        if (list.isEmpty()) {
+            return null;
+        }
+
+        T sample = list.get(0);
+        Class<?> clazz = sample.getClass();
+
+        try {
+            // Try to find a field with the given name (case-insensitive)
+            Field field = Arrays.stream(clazz.getDeclaredFields())
+                .filter(f -> f.getName().equalsIgnoreCase(fieldName))
+                .findFirst()
+                .orElse(null);
+
+            if (field != null) {
+                field.setAccessible(true);
+                for (T item : list) {
+                    if (item == null) {
+                        continue;
+                    }
+
+                    Object fieldValue = field.get(item);
+                    if (fieldValue != null && Arrays.stream(values)
+                        .anyMatch(value -> fieldValue.toString().equals(value))) {
+                        return item;
+                    }
+                }
+            }
+        } catch (IllegalAccessException e) {
+            // Ignore and return null if there's an access issue
+        }
+        return null;
+    }
+
+    // Check if the object is a primitive or wrapper type
+    private boolean isPrimitiveOrWrapper(Object obj) {
+        return obj instanceof String ||
+            obj instanceof Number ||
+            obj instanceof Boolean ||
+            obj instanceof Character;
+    }
+
     public static void main(String[] args) {
-        Student st1 = Student.builder().name("John").age(1).isGraduated(false).build();
-        Student st2 = Student.builder().name("Jane").age(2).isGraduated(true).build();
-        Student st3 = Student.builder().name("Mike").age(3).isGraduated(false).build();
-        Student st4 = Student.builder().name("Alice").age(4).isGraduated(true).build();
-        Student st5 = Student.builder().name("Bob").age(5).isGraduated(true).build();
-        Student st6 = Student.builder().name("Charlie").age(6).isGraduated(false).build();
-        
         ArrayList<Student> students = new ArrayList<>();
-        students.add(st1);
-        students.add(st2);
-        students.add(st3);
-        students.add(st4);
-        students.add(st5);
-        students.add(st6);
+        students.add(Student.builder().name("John").age(1).isGraduated(false).build());
+        students.add(Student.builder().name("Jane").age(2).isGraduated(true).build());
+        students.add(Student.builder().name("Mike").age(3).isGraduated(false).build());
+        students.add(Student.builder().name("Alice").age(4).isGraduated(true).build());
+        students.add(Student.builder().name("Bob").age(5).isGraduated(true).build());
+        students.add(Student.builder().name("Charlie").age(6).isGraduated(false).build());
 
-        Student selectedStudent = selectFromList(students, "name", "John");
-        System.out.println(selectedStudent);
-        Student selectedStudent2 = selectFromList(students, "age", "2");
-        System.out.println(selectedStudent2);
-        Student selectedStudent3 = selectFromList(students, "isGraduated", "true");
-        System.out.println(selectedStudent3);
-        Student selectedStudent4 = selectFromList(students, "index", "3");
-        System.out.println(selectedStudent4);
+        List<Map<String, Object>> mapList = students.stream()
+            .map(Student::toMap)
+            .collect(Collectors.toList());
 
-        List<Map<String, Object>> mapList = new ArrayList<>();
-        mapList.add(st1.toMap());
-        mapList.add(st2.toMap());
-        mapList.add(st3.toMap());
-        mapList.add(st4.toMap());
-        mapList.add(st5.toMap());
-        mapList.add(st6.toMap());
+        List<String> names = students.stream().map(Student::getName).collect(Collectors.toList());
+
+        System.out.println(selectFromList(students, "name", "John"));
+        System.out.println(selectFromList(students, "age", "2"));
+        System.out.println(selectFromList(students, "isGraduated", "true"));
+        System.out.println(selectFromList(students, "index", "3"));
 
         System.out.println(selectFromList(mapList, "name", "John"));
         System.out.println(selectFromList(mapList, "age", "2"));
         System.out.println(selectFromList(mapList, "isGraduated", "true"));
         System.out.println(selectFromList(mapList, "index", "3"));
 
-        ArrayList<String> names = new ArrayList<>();
-        names.add("John");
-        names.add("Alice");
-        names.add("Bob");
-        names.add("Charlie");
-        names.add("Mike");
-        names.add("David");
-
-        System.out.println(selectFromList(names, "age", "John"));
+        System.out.println(selectFromList(names, "", "John"));
         System.out.println(selectFromList(names, "index", "3"));
     }
 }
